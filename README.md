@@ -18,9 +18,6 @@ cd arctest
 
 # Install dependencies
 pipenv install
-
-# Install semgrep (required for rule-based scanning)
-pipenv run pip install semgrep
 ```
 
 ## arctest CLI
