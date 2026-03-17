@@ -1,0 +1,101 @@
+rules:
+  # Heuristic: Socket creation followed by dup2 to stdin/stdout/stderr
+  # This is a classic reverse shell pattern regardless of target IP/port
+  - id: reverse-shell-dup2-pattern
+    languages:
+      - python
+    message: >-
+      Detected socket file descriptor redirection pattern commonly used in reverse shells.
+      The code redirects stdin/stdout/stderr to a socket connection.
+    metadata:
+      description: Detect reverse shell via dup2 redirection pattern
+      category: reverse_shell
+      severity: critical
+    mode: taint
+    pattern-sources:
+      - pattern: socket.socket(...)
+      - pattern: $S.fileno()
+    pattern-sinks:
+      - pattern: os.dup2($FD, 0)
+      - pattern: os.dup2($FD, 1)
+      - pattern: os.dup2($FD, 2)
+      - pattern: dup2($FD, 0)
+      - pattern: dup2($FD, 1)
+      - pattern: dup2($FD, 2)
+    severity: ERROR
+
+  # Heuristic: pty.spawn used with shell - often indicates reverse shell
+  - id: pty-spawn-shell
+    languages:
+      - python
+    message: >-
+      Detected pty.spawn() call with shell. This is commonly used in reverse shells
+      to spawn an interactive shell session.
+    metadata:
+      description: Detect pty.spawn with shell argument
+      category: reverse_shell
+      severity: critical
+    patterns:
+      - pattern-either:
+          - pattern: pty.spawn("/bin/sh")
+          - pattern: pty.spawn("/bin/bash")
+          - pattern: pty.spawn("/bin/zsh")
+          - pattern: pty.spawn("sh")
+          - pattern: pty.spawn("bash")
+          - pattern: pty.spawn("zsh")
+          - pattern: pty.spawn($SHELL)
+    severity: ERROR
+
+  # Heuristic: Socket connect followed by pty spawn in same scope
+  - id: socket-connect-with-pty
+    languages:
+      - python
+    message: >-
+      Detected socket connection combined with pty.spawn in the same function.
+      This pattern is characteristic of reverse shell implementations.
+    metadata:
+      description: Socket connection combined with pty spawn
+      category: reverse_shell
+      severity: critical
+    patterns:
+      - pattern-either:
+          - pattern: |
+              $S = socket.socket(...)
+              ...
+              $S.connect(...)
+              ...
+              pty.spawn(...)
+          - pattern: |
+              $S.connect(...)
+              ...
+              os.dup2(...)
+              ...
+              pty.spawn(...)
+    severity: ERROR
+
+  # Heuristic: Import of pty module combined with socket - suspicious combination
+  - id: suspicious-pty-socket-imports
+    languages:
+      - python
+    message: >-
+      Detected import of both pty and socket modules. This combination is commonly
+      used in reverse shell implementations.
+    metadata:
+      description: Suspicious import combination for reverse shell
+      category: reverse_shell
+      severity: high
+    patterns:
+      - pattern-either:
+          - pattern: |
+              import pty
+              ...
+              import socket
+          - pattern: |
+              import socket
+              ...
+              import pty
+          - pattern: |
+              from pty import spawn
+              ...
+              import socket
+    severity: WARNING

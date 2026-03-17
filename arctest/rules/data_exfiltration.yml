@@ -1,0 +1,126 @@
+rules:
+  # Heuristic: Reading SSH keys (any key file in .ssh directory)
+  - id: ssh-key-access
+    languages:
+      - python
+    message: >-
+      Detected access to SSH key files. Test code should not read SSH private keys.
+    metadata:
+      description: Detect SSH key file access
+      category: credential_theft
+      severity: critical
+    patterns:
+      - pattern-either:
+          - pattern: open($PATH, ...)
+          - pattern: Path($PATH).read_text(...)
+          - pattern: Path($PATH).read_bytes(...)
+      - metavariable-regex:
+          metavariable: $PATH
+          regex: .*\.ssh.*(id_rsa|id_ed25519|id_ecdsa|id_dsa|authorized_keys).*
+    severity: ERROR
+
+  # Heuristic: Reading AWS credentials
+  - id: aws-credentials-access
+    languages:
+      - python
+    message: >-
+      Detected access to AWS credentials file. Test code should not read cloud credentials.
+    metadata:
+      description: Detect AWS credentials file access
+      category: credential_theft
+      severity: critical
+    patterns:
+      - pattern-either:
+          - pattern: open($PATH, ...)
+          - pattern: Path($PATH).read_text(...)
+      - metavariable-regex:
+          metavariable: $PATH
+          regex: .*\.aws.*(credentials|config).*
+    severity: ERROR
+
+  # Heuristic: Bulk environment variable access followed by network operation
+  - id: env-exfiltration
+    languages:
+      - python
+    message: >-
+      Detected bulk environment variable access. This pattern may indicate
+      credential harvesting for exfiltration.
+    metadata:
+      description: Bulk environment variable access
+      category: data_exfiltration
+      severity: high
+    mode: taint
+    pattern-sources:
+      - pattern: os.environ
+      - pattern: os.environ.items()
+      - pattern: os.environ.keys()
+      - pattern: os.environ.values()
+      - pattern: dict(os.environ)
+      - pattern: environ.items()
+      - pattern: environ.keys()
+    pattern-sinks:
+      - pattern: requests.$METHOD(...)
+      - pattern: urllib.request.urlopen(...)
+      - pattern: httpx.$METHOD(...)
+      - pattern: $SOCKET.send(...)
+      - pattern: $SOCKET.sendall(...)
+    severity: WARNING
+
+  # Heuristic: Reading /etc/passwd (credential harvesting on Linux)
+  - id: passwd-file-access
+    languages:
+      - python
+    message: >-
+      Detected access to /etc/passwd file. This is commonly used for credential
+      harvesting or system enumeration.
+    metadata:
+      description: Access to /etc/passwd
+      category: system_enumeration
+      severity: high
+    patterns:
+      - pattern-either:
+          - pattern: open("/etc/passwd", ...)
+          - pattern: open('/etc/passwd', ...)
+          - pattern: Path("/etc/passwd").read_text(...)
+          - pattern: Path('/etc/passwd').read_text(...)
+    severity: WARNING
+
+  # Heuristic: Reading browser data directories
+  - id: browser-data-access
+    languages:
+      - python
+    message: >-
+      Detected access to browser data directories. This may indicate
+      credential or cookie theft.
+    metadata:
+      description: Browser data directory access
+      category: credential_theft
+      severity: critical
+    patterns:
+      - pattern-either:
+          - pattern: open($PATH, ...)
+          - pattern: Path($PATH)
+          - pattern: os.path.join($BASE, $PATH)
+      - metavariable-regex:
+          metavariable: $PATH
+          regex: .*(\.mozilla|\.chrome|\.config[/\\]google-chrome|AppData.*Local.*Google.*Chrome|[/\\](Login Data|Cookies|Web Data)).*
+    severity: ERROR
+
+  # Heuristic: Reading sensitive config files
+  - id: sensitive-config-access
+    languages:
+      - python
+    message: >-
+      Detected access to sensitive configuration files that may contain credentials.
+    metadata:
+      description: Sensitive config file access
+      category: credential_theft
+      severity: high
+    patterns:
+      - pattern-either:
+          - pattern: open($PATH, ...)
+          - pattern: Path($PATH).read_text(...)
+      - metavariable-regex:
+          metavariable: $PATH
+          regex: .*(\.env|\.netrc|\.pgpass|\.my\.cnf|\.docker/config\.json|\.kube/config|\.git-credentials).*
+    severity: WARNING

@@ -1,0 +1,120 @@
+rules:
+  # Heuristic: Server socket binding to external interfaces (not localhost)
+  # Note: Localhost bindings are common in test code and excluded
+  - id: server-socket-bind-external
+    languages:
+      - python
+    message: >-
+      Detected server socket binding to non-localhost interface. This could
+      expose a backdoor accessible from external hosts.
+    metadata:
+      description: External server socket binding detected
+      category: network_server
+      severity: high
+    patterns:
+      - pattern-either:
+          - pattern: $S.bind(($HOST, $PORT))
+          - pattern: socketserver.TCPServer(($HOST, $PORT), ...)
+          - pattern: socketserver.UDPServer(($HOST, $PORT), ...)
+          - pattern: http.server.HTTPServer(($HOST, $PORT), ...)
+      - metavariable-pattern:
+          metavariable: $HOST
+          patterns:
+            # Match external interfaces - exclude localhost patterns
+            - pattern-not-regex: ^["']?(127\.0\.0\.1|localhost|0\.0\.0\.0||::1)["']?$
+    severity: WARNING
+
+  # Low-severity catch for HTTP server handlers (informational)
+  - id: http-server-handler
+    languages:
+      - python
+    message: >-
+      Detected HTTP server handler class usage. Review if this is expected
+      test infrastructure.
+    metadata:
+      description: HTTP server handler detected
+      category: network_server
+      severity: low
+    patterns:
+      - pattern-either:
+          - pattern: SimpleHTTPRequestHandler
+          - pattern: BaseHTTPRequestHandler
+    severity: INFO
+
+  # Heuristic: Outbound connection to external hosts (not localhost)
+  - id: outbound-socket-connect-external
+    languages:
+      - python
+    message: >-
+      Detected outbound socket connection to non-localhost host. Unexpected
+      external connections in test code may indicate C2 communication.
+    metadata:
+      description: External outbound socket connection
+      category: network_communication
+      severity: medium
+    patterns:
+      - pattern-either:
+          - pattern: $S.connect(($HOST, $PORT))
+          - pattern: socket.create_connection(($HOST, $PORT))
+          - pattern: socket.create_connection(($HOST, $PORT), ...)
+      - metavariable-pattern:
+          metavariable: $HOST
+          patterns:
+            # Match external hosts - exclude localhost patterns
+            - pattern-not-regex: ^["']?(127\.0\.0\.1|localhost|::1)["']?$
+    severity: WARNING
+
+  # Heuristic: HTTP requests sending sensitive data to external URLs
+  # Uses taint tracking to detect when sensitive data flows to network requests
+  - id: sensitive-data-exfiltration
+    languages:
+      - python
+    message: >-
+      Detected sensitive data being sent via HTTP request. This pattern
+      indicates potential data exfiltration of credentials or environment variables.
+    metadata:
+      description: Sensitive data sent via HTTP
+      category: data_exfiltration
+      severity: high
+    mode: taint
+    pattern-sources:
+      # Environment variables
+      - pattern: os.environ
+      - pattern: os.environ.items()
+      - pattern: os.environ.get(...)
+      - pattern: os.getenv(...)
+      # File reads (potential credential files)
+      - pattern: open(...).read()
+      - pattern: open(...).read(...)
+      - pattern: Path(...).read_text()
+      - pattern: Path(...).read_bytes()
+      # Subprocess output (system enumeration)
+      - pattern: subprocess.check_output(...)
+      - pattern: subprocess.run(...).stdout
+    pattern-sinks:
+      - pattern: requests.post($URL, ...)
+      - pattern: requests.put($URL, ...)
+      - pattern: requests.get($URL, params=...)
+      - pattern: httpx.post($URL, ...)
+      - pattern: httpx.put($URL, ...)
+      - pattern: urllib.request.urlopen($REQ)
+    severity: WARNING
+
+  # Heuristic: DNS lookup (could be used for DNS exfiltration)
+  - id: dns-lookup
+    languages:
+      - python
+    message: >-
+      Detected DNS lookup operation. DNS can be used for data exfiltration
+      by encoding data in subdomain queries.
+    metadata:
+      description: DNS lookup operation
+      category: dns_exfiltration
+      severity: low
+    patterns:
+      - pattern-either:
+          - pattern: socket.gethostbyname(...)
+          - pattern: socket.getaddrinfo(...)
+          - pattern: dns.resolver.resolve(...)
+          - pattern: dns.resolver.query(...)
+    severity: INFO

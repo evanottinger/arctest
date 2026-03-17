@@ -1,0 +1,210 @@
+# Obfuscation Detection Rules
+#
+# Some rules in this file are adapted from GuardDog by DataDog
+# https://github.com/DataDog/guarddog
+# Licensed under Apache License 2.0
+#
+# Modifications:
+# - Removed path restrictions to enable test file scanning
+# - Adjusted severity levels for test file context
+# - Added additional patterns for test-specific detection
+
+rules:
+  # Adapted from GuardDog exec-base64.yml
+  # Detects base64-encoded payloads being executed
+  - id: exec-base64
+    languages:
+      - python
+    message: >-
+      Detected base64-decoded content being executed. This is a common technique
+      to hide malicious payloads from static analysis.
+    metadata:
+      description: Base64 decode followed by code execution
+      category: obfuscation
+      severity: critical
+      source: GuardDog (https://github.com/DataDog/guarddog)
+    mode: taint
+    pattern-sources:
+      - pattern-either:
+          - pattern: base64.b64decode(...)
+          - pattern: base64.b64decode("...")
+          - pattern: codecs.decode(..., 'base64')
+          - pattern: codecs.decode(..., 'base_64')
+          - pattern: codecs.decode(..., 'base-64')
+          - pattern: __import__("base64").b64decode(...)
+          - pattern: importlib.import_module('base64').b64decode(...)
+          - pattern: marshal.loads(zlib.decompress(...))
+          - pattern: |
+              "...".decode(...)
+    pattern-sinks:
+      - pattern-either:
+          - pattern-inside: exec(...)
+          - pattern-inside: eval(...)
+          - pattern: __import__("builtins").exec(...)
+          - pattern: __import__("builtins").eval(...)
+          - pattern-inside: subprocess.call(...)
+          - pattern-inside: subprocess.run(...)
+          - pattern-inside: subprocess.Popen(...)
+          - pattern-inside: subprocess.check_output(...)
+          - pattern-inside: os.system(...)
+          - pattern-inside: os.popen(...)
+    severity: ERROR
+
+  # Adapted from GuardDog obfuscation.yml
+  # Detects common code obfuscation techniques
+  - id: code-obfuscation
+    languages:
+      - python
+    message: >-
+      Detected obfuscation technique commonly used by malware to hide malicious code.
+    metadata:
+      description: Common obfuscation patterns
+      category: obfuscation
+      severity: high
+      source: GuardDog (https://github.com/DataDog/guarddog)
+    patterns:
+      - pattern-either:
+          # Hex-encoded "eval" string
+          - pattern: eval("\x65\x76\x61\x6c")
+          - pattern: eval("\145\166\141\154")
+
+          # BlankOBF style naming
+          - pattern: _____=eval(...)
+
+          # Accessing builtins indirectly
+          - pattern: getattr(__builtins__, ...)
+          - pattern: getattr(builtins, ...)
+          - pattern: vars(__builtins__)[$FUNC](...)
+          - pattern: vars(__builtins__).get($FUNC)(...)
+
+          # Character code assembly
+          - pattern: |
+              ''.join(chr($X) for $X in [...])
+          - pattern: |
+              ''.join(map(chr, [...]))
+
+          # Hex-encoded bytes
+          - patterns:
+              - pattern: $HEX.decode(...)
+              - metavariable-regex:
+                  metavariable: $HEX
+                  regex: b['"](\\[xX]\S{1,5}){4,}['"]
+
+          # globals/vars indirection to call eval/exec
+          - pattern: globals()['eval'](...)
+          - pattern: globals()['exec'](...)
+          - pattern: globals()['\x65\x76\x61\x6c'](...)
+          - pattern: vars(globals()['__builtins__'])['exec'](...)
+          - pattern: vars(globals()['__builtins__'])['eval'](...)
+          - pattern: vars(locals()['__builtins__'])['exec'](...)
+          - pattern: vars(locals()['__builtins__'])['eval'](...)
+    severity: WARNING
+
+  # Adapted from GuardDog shady-links.yml
+  # Detects suspicious URLs commonly used for exfiltration or C2
+  - id: suspicious-url
+    languages:
+      - python
+    message: >-
+      Detected URL to a domain commonly used for data exfiltration, tunneling,
+      or command-and-control communication.
+    metadata:
+      description: Suspicious URL detection
+      category: network_communication
+      severity: high
+      source: GuardDog (https://github.com/DataDog/guarddog)
+    patterns:
+      # Ignore comments
+      - pattern-not-regex: ^\s*#.*
+
+      # Exclude localhost/private IPs
+      - pattern-not-regex: (https?:\/\/)?(localhost|127\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|0\.0\.0\.0)
+
+      # Exclude RFC 5737 test IP ranges (TEST-NET-1, TEST-NET-2, TEST-NET-3)
+      - pattern-not-regex: (https?:\/\/)?(192\.0\.2\.\d+|198\.51\.100\.\d+|203\.0\.113\.\d+)
+
+      - patterns:
+          - pattern: "..."
+          - pattern-either:
+              # URL shorteners
+              - pattern-regex: (https?:\/\/)?bit\.ly
+
+              # Ephemeral/tunnel services
+              - pattern-regex: (https?:\/\/)?[^\s"']*?(ngrok\.io|ngrok-free\.app|ngrok-free\.dev|workers\.dev|trycloudflare\.com|localhost\.run)
+
+              # Webhook/callback services
+              - pattern-regex: (https?:\/\/)?[^\s"']*?(webhook\.site|webhook\.cool|oastify\.com|burpcollaborator\.net|pipedream\.net|beeceptor\.com)
+
+              # Paste/file sharing (exfiltration)
+              - pattern-regex: (https?:\/\/)?[^\s"']*?(pastebin\.com|hastebin\.com|paste\.ee|transfer\.sh|file\.io|ghostbin\.site|rentry\.co)
+
+              # Discord webhooks (common exfil target)
+              - pattern-regex: (https?:\/\/)?discord\.com\/api\/webhooks
+              - pattern-regex: (https?:\/\/)?discordapp\.com\/api\/webhooks
+
+              # Telegram bot API
+              - pattern-regex: (https?:\/\/)?api\.telegram\.org\/bot
+
+              # IP info services (reconnaissance)
+              # Note: ipify.org removed - legitimate public API commonly used in tests
+              - pattern-regex: (https?:\/\/)?[^\s"']*?(ipinfo\.io|checkip\.dyndns|ifconfig\.me|jsonip\.com)
+
+              # Raw IP addresses in URLs
+              - pattern-regex: https?:\/\/\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}
+    severity: WARNING
+
+  # Adapted from GuardDog unicode.yml
+  # Detects homoglyph/unicode obfuscation in code (not strings)
+  - id: unicode-obfuscation
+    languages:
+      - python
+    message: >-
+      Detected suspicious unicode characters in code that may be used to disguise
+      malicious identifiers (homoglyph attack).
+    metadata:
+      description: Unicode homoglyph obfuscation
+      category: obfuscation
+      severity: high
+      source: GuardDog (https://github.com/DataDog/guarddog)
+    patterns:
+      # Ignore string contents
+      - pattern-not-regex: (["'].*?["'])
+      - pattern-not-regex: ("""(.|\n)*?""")
+      - pattern-not-regex: ('''(.|\n)*?''')
+      # Ignore comments
+      - pattern-not-regex: \#(.*)$
+
+      - pattern-either:
+          # Lowercase lookalikes
+          - pattern-regex: ([ªᵃₐⓐａ𝐚𝑎𝒂𝒶𝓪𝔞𝕒𝖆𝖺𝗮𝘢𝙖𝚊])
+          - pattern-regex: ([ᵇⓑｂ𝐛𝑏𝒃𝒷𝓫𝔟𝕓𝖇𝖻𝗯𝘣𝙗𝚋])
+          - pattern-regex: ([ᶜⅽⓒｃ𝐜𝑐𝒄𝒸𝓬𝔠𝕔𝖈𝖼𝗰𝘤𝙘𝚌])
+          - pattern-regex: ([ᵈⅆⅾⓓｄ𝐝𝑑𝒅𝒹𝓭𝔡𝕕𝖉𝖽𝗱𝘥𝙙𝚍])
+          - pattern-regex: ([ᵉₑℯⅇⓔｅ𝐞𝑒𝒆𝓮𝔢𝕖𝖊𝖾𝗲𝘦𝙚𝚎])
+          - pattern-regex: ([ᶠⓕｆ𝐟𝑓𝒇𝒻𝓯𝔣𝕗𝖋𝖿𝗳𝘧𝙛𝚏])
+          # Uppercase lookalikes (subset for brevity)
+          - pattern-regex: ([ᴬⒶＡ𝐀𝐴𝑨𝒜𝓐𝔄𝔸𝕬𝖠𝗔𝘈𝘼𝙰])
+          - pattern-regex: ([ᴮℬⒷＢ𝐁𝐵𝑩𝓑𝔅𝔹𝕭𝖡𝗕𝘉𝘽𝙱])
+          - pattern-regex: ([ℂℭⅭⒸꟲＣ𝐂𝐶𝑪𝒞𝓒𝕮𝖢𝗖𝘊𝘾𝙲])
+          - pattern-regex: ([ᴰⅅⅮⒹＤ𝐃𝐷𝑫𝒟𝓓𝔇𝔻𝕯𝖣𝗗𝘋𝘿𝙳])
+          - pattern-regex: ([ᴱℰⒺＥ𝐄𝐸𝑬𝓔𝔈𝔼𝕰𝖤𝗘𝘌𝙀𝙴])
+    severity: WARNING
+
+  # Additional pattern: steganography indicators
+  # Adapted from GuardDog steganography.yml
+  - id: steganography-indicators
+    languages:
+      - python
+    message: >-
+      Detected potential steganography usage - hiding data in images is a technique
+      used by malware to conceal payloads.
+    metadata:
+      description: Steganography library usage
+      category: obfuscation
+      severity: medium
+      source: GuardDog (https://github.com/DataDog/guarddog)
+    pattern-either:
+      - pattern: import stegano
+      - pattern: import steganography
+      - pattern: $IMG.getdata()
+    severity: INFO

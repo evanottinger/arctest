@@ -1,0 +1,125 @@
+rules:
+  # Heuristic: Base64 decode followed by exec/eval
+  - id: base64-code-execution
+    languages:
+      - python
+    message: >-
+      Detected base64 decoding followed by code execution. This is a common
+      obfuscation technique used by malware.
+    metadata:
+      description: Base64 encoded code execution
+      category: code_execution
+      severity: critical
+    mode: taint
+    pattern-sources:
+      - pattern: base64.b64decode(...)
+      - pattern: b64decode(...)
+      - pattern: base64.decodebytes(...)
+    pattern-sinks:
+      - pattern: exec(...)
+      - pattern: eval(...)
+      - pattern: compile(...)
+    severity: ERROR
+
+  # Heuristic: Dynamic code generation via getattr on builtins
+  - id: dynamic-builtin-access
+    languages:
+      - python
+    message: >-
+      Detected dynamic access to builtin functions. This obfuscation technique
+      is used to hide exec/eval calls from static analysis.
+    metadata:
+      description: Dynamic builtin function access
+      category: obfuscation
+      severity: high
+    patterns:
+      - pattern-either:
+          - pattern: getattr(__builtins__, $NAME)(...)
+          - pattern: getattr(builtins, $NAME)(...)
+          - pattern: __builtins__[$NAME](...)
+          - pattern: vars(__builtins__)[$NAME](...)
+          - pattern: globals()[$NAME](...)
+    severity: WARNING
+
+  # Heuristic: Hex/unicode string obfuscation for function names
+  - id: hex-string-obfuscation
+    languages:
+      - python
+    message: >-
+      Detected hex-encoded or unicode-escaped strings being used to call functions.
+      This is an obfuscation technique to evade static analysis.
+    metadata:
+      description: Hex/unicode string obfuscation
+      category: obfuscation
+      severity: high
+    patterns:
+      - pattern-regex: \\x[0-9a-fA-F]{2}
+      - pattern-inside: |
+          getattr(..., $ENCODED)
+    severity: WARNING
+
+  # Heuristic: Remote code fetch and execute
+  - id: remote-code-execution
+    languages:
+      - python
+    message: >-
+      Detected fetching code from a remote URL and executing it. This is
+      a common malware delivery technique.
+    metadata:
+      description: Remote code fetch and execution
+      category: code_execution
+      severity: critical
+    mode: taint
+    pattern-sources:
+      - pattern: requests.get($URL).text
+      - pattern: requests.get($URL).content
+      - pattern: urllib.request.urlopen($URL).read()
+      - pattern: urlopen($URL).read()
+    pattern-sinks:
+      - pattern: exec(...)
+      - pattern: eval(...)
+    severity: ERROR
+
+  # Heuristic: Compile with exec mode
+  - id: compile-exec
+    languages:
+      - python
+    message: >-
+      Detected compile() with 'exec' mode followed by execution. This allows
+      dynamic code execution that can evade analysis.
+    metadata:
+      description: Compile with exec mode
+      category: code_execution
+      severity: high
+    patterns:
+      - pattern: |
+          $CODE = compile($SOURCE, ..., "exec")
+          ...
+          exec($CODE)
+    severity: WARNING
+
+  # Heuristic: Writes to Python source files (high severity, likely malicious)
+  - id: project-file-mutation
+    languages:
+      - python
+    message: >-
+      Detected file write to project source directory. Test code should not
+      modify source files - this may indicate a supply chain attack.
+    metadata:
+      description: Project source file mutation
+      category: file_mutation
+      severity: critical
+    patterns:
+      - pattern-either:
+          - pattern: open($PATH, $MODE, ...)
+          - pattern: $PATH.write_text(...)
+          - pattern: $PATH.write_bytes(...)
+          - pattern: Path($PATH).write_text(...)
+          - pattern: Path($PATH).write_bytes(...)
+      - metavariable-regex:
+          metavariable: $MODE
+          regex: .*[wax].*
+      - metavariable-regex:
+          metavariable: $PATH
+          regex: .*\.py["']?\s*$
+    severity: ERROR
