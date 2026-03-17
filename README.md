@@ -13,8 +13,8 @@ This project provides:
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-repo/reimagined-carnival.git
-cd reimagined-carnival
+git clone https://github.com/your-repo/arctestgit
+cd arctest
 
 # Install dependencies
 pipenv install
