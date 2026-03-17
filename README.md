@@ -13,7 +13,7 @@ This project provides:
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-repo/arctestgit
+git clone git@github.com:evanottinger/arctest.git
 cd arctest
 
 # Install dependencies
